@@ -1,5 +1,13 @@
-Para rodar a conversão de dados instale os requerimentos em requirements.txt com pip install -r requirements.txt. de preferencia em um ambiente virutal
-Depois execute main_converter.py com o comando python main_converter.py, certifique de estar na pasta DataExtractor
+Instale as dependências do arquivo requirements.txt com:
+pip install -r requirements.txt
+
+De preferência, faça isso dentro de um ambiente virtual.
+
+Em seguida, execute o arquivo main_converter.py com:
+python main_converter.py
+
+Certifique-se de estar dentro da pasta DataExtractor ao rodar o comando.
+
 
 O script vai:
 
@@ -20,4 +28,4 @@ Sobre os conversores:
 YOLOConverter: Gera anotações de segmentação no formato YOLO com coordenadas normalizadas
 MaskRCNNConverter: Gera anotações no formato COCO JSON com segmentações poligonais
 
-o script visu foi feito para testar se o codigo esta convertendo certo
+O script visu foi feito para testar se o codigo esta convertendo certo
