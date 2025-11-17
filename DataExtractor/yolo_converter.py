@@ -7,7 +7,6 @@ from glob import glob
 
 
 class YOLOConverter:
-    """Conversor de XML para formato YOLO Segmentation"""
     
     def __init__(self, base_dir="./TRACKB1", output_dir="./dataset_YOLO", train_ratio=0.8, class_id=0):
         self.base_dir = base_dir
