@@ -128,33 +128,30 @@ class Augmentation:
     
     @staticmethod
     def resize_image(image : Image.Image | np.ndarray,
-                     new_width : int,
-                     new_height: int,
-                     masks : Iterable[Iterable[Tuple[float]]] = None,
-                     return_ndarray : bool = False,
-                     **kwargs) -> np.array:
-        
-        if isinstance(image, np.array):
+                 new_width : int,
+                 new_height: int,
+                 masks : Iterable[Iterable[Tuple[float]]] = None,
+                 return_ndarray : bool = False,
+                 **kwargs) -> np.array:
+    
+        if isinstance(image, np.ndarray): 
             image = Image.fromarray(image)
         
         if masks is not None:
-            
-            # Atentar para o fato que o numpy inverte os canais width e height
-            # Seleciona até 2 para ignorar o canal de cores, se houver
-            #height, width = image.shape[:2]
-
             width, height = image.size
             
-            masks = Augmentation.resize_masks(masks, 
-                                              width, new_width,
-                                              height, new_height)
+            masks = Augmentation.resize_masks(
+                masks, 
+                width, new_width,
+                height, new_height
+            )
 
         new_image = image.resize((new_width, new_height))
 
         if return_ndarray:
             new_image = np.array(new_image)
         
-        return new_image, masks 
+        return new_image, masks
     
     
     @staticmethod
