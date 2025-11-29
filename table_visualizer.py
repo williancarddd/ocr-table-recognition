@@ -177,7 +177,8 @@ class TableVisualizer:
         alpha: float = 0.3,
         line_width: int = 2,
         save_path: Optional[Union[str, Path]] = None,
-        title: Optional[str] = None
+        title: Optional[str] = None,
+        generate_mask: bool = False
     ) -> plt.Figure:
         """
         Visualiza tabelas e células sobre uma imagem.
@@ -221,6 +222,31 @@ class TableVisualizer:
         else:
             img_array = image
         
+        if generate_mask:
+            # Criar máscara branca com as mesmas dimensões
+            height, width = img_array.shape[:2]
+            mask = np.ones((height, width), dtype=np.uint8) * 255
+            
+            # Desenhar células como polígonos pretos com bordas brancas
+            for table in tables:
+                if table.cells:
+                    for cell in table.cells:
+                        if cell.coordinates:
+                            points = cell.get_polygon()
+                            cv2.fillPoly(mask, [points], color=(0,))
+                            cv2.polylines(mask, [points], isClosed=True, color=(255,), thickness=2)
+                elif table.coordinates:
+                    # Fallback: se não houver células, desenha a tabela
+                    points = table.get_polygon()
+                    cv2.fillPoly(mask, [points], color=(0,))
+            
+            # Salvar máscara separadamente
+            if save_path:
+                save_path_obj = Path(save_path)
+                mask_filename = f"{save_path_obj.stem}_mask{save_path_obj.suffix}"
+                mask_path = save_path_obj.with_name(mask_filename)
+                cv2.imwrite(str(mask_path), mask)
+
         # Criar figura
         fig, ax = plt.subplots(figsize=self.figsize)
         ax.imshow(img_array)

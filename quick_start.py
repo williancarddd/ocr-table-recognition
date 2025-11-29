@@ -25,7 +25,7 @@ def exemplo_basico():
     print("-" * 50)
     
     # 1. Parse do arquivo XML
-    xml_path = Path("ICDAR2019_cTDaR/training/TRACKB1/ground_truth/cTDaR_t00000.xml")
+    xml_path = Path("ICDAR2019_cTDaR/samples/ground_truth/cTDaR_s104.xml")
     filename, tables = TableAnnotationParser.parse_xml(xml_path)
     
     print(f"Arquivo: {filename}")
@@ -33,7 +33,7 @@ def exemplo_basico():
     print(f"Células: {sum(len(t.cells) for t in tables)}")
     
     # 2. Tentar carregar a imagem real do XML
-    image_path = "/home/williancarddd/Projects/workspace-usp/ocr-table-recognition/ICDAR2019_cTDaR/training/TRACKB1/ground_truth/cTDaR_t00000.jpg"
+    image_path = "ICDAR2019_cTDaR/samples/ground_truth/cTDaR_s104.jpg"
     
     # 3. Visualizar (se não encontrar imagem, TableVisualizer cria uma automaticamente)
     visualizer = TableVisualizer()
@@ -41,6 +41,7 @@ def exemplo_basico():
     fig = visualizer.visualize_tables(
         tables,
         image=image_path,
+        generate_mask=True,
         save_path=str(output_path)
     )
     plt.close()
