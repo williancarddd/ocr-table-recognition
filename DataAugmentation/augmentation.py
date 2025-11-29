@@ -1,5 +1,5 @@
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageEnhance
 import albumentations as A
 
 import shutil
@@ -46,7 +46,7 @@ class Augmentation:
                 noisy_image[y,x] = 255 if noise_type == 'salt' else 0 
           
         if not return_ndarray:
-            noisy_image = Image.fromarray(image)
+            noisy_image = Image.fromarray(noisy_image)
         
         return noisy_image
 
@@ -70,15 +70,15 @@ class Augmentation:
     
     @staticmethod
     def set_brightness(image : Image.Image | np.ndarray, 
-                       amount : int = 3,
+                       factor : float = 1.5,
                        return_ndarray = False,
                        **kwargs):
         
         if Augmentation.is_ndarray(image):
             image = Image.fromarray(image)
 
-
-        new_image = image.filter(ImageFilter.GaussianBlur(radius=amount, **kwargs))
+        enhancer = ImageEnhance.Brightness(image)
+        new_image = enhancer.enhance(factor, **kwargs)
 
         if return_ndarray:
             new_image = np.array(new_image)
