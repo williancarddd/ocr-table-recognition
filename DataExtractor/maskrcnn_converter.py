@@ -1,201 +1,150 @@
 import os
 import json
 import shutil
-import random
-import xml.etree.ElementTree as ET
+import yaml
 from PIL import Image
-from glob import glob
-from datetime import datetime
 
 
-class MaskRCNNConverter:
+class YOLO2MaskRCNN:
     
-    def __init__(self, base_dir="./TRACKB1", output_dir="./dataset_RCNN", train_ratio=0.8):
-        self.base_dir = base_dir
-        self.gt_dir = base_dir
+    def __init__(self, folds_dir="dataset_folds", output_dir="dataset_rcnn"):
+        self.folds_dir = folds_dir
         self.output_dir = output_dir
-        self.train_ratio = train_ratio
+
+    def load_classes(self, yml_path):
+        with open(yml_path, "r") as f:
+            data = yaml.safe_load(f)
+        names = data["names"]
         
-        self.categories = [
-            {"id": 1, "name": "cell", "supercategory": "table"}
+        categories = []
+        for i, name in enumerate(names):
+            categories.append({"id": int(i), "name": name})
+        return categories
+
+    def yolo_to_coco_bbox(self, xc, yc, w, h, img_w, img_h):
+        x1 = (xc - w / 2) * img_w
+        y1 = (yc - h / 2) * img_h
+        return [
+            x1,
+            y1,
+            w * img_w,
+            h * img_h
         ]
-        
-        self.train_pairs = []
-        self.val_pairs = []
+
+    def process_split(self, split_path, split_name, categories, out_images_dir):
     
-    def create_folders(self):
-        for split in ["train", "val"]:
-            os.makedirs(os.path.join(self.output_dir, split), exist_ok=True)
-    
-    def find_files(self):
-        image_files = sorted(
-            glob(os.path.join(self.gt_dir, "*.jpg")) +
-            glob(os.path.join(self.gt_dir, "*.png")) +
-            glob(os.path.join(self.gt_dir, "*.TIFF"))
-        )
-        xml_files = sorted(glob(os.path.join(self.gt_dir, "*.xml")))
-        
-        print(f"xmls encontrados: {len(xml_files)}")
-        print(f"imagens encontradas: {len(image_files)}")
-        
-        return xml_files, image_files
-    
-    def associate_pairs(self, xml_files):
-        pairs = []
-        for xml in xml_files:
-            base = os.path.splitext(os.path.basename(xml))[0]
-            
-            for ext in [".jpg", ".png", ".TIFF"]:
-                img_path = os.path.join(self.gt_dir, base + ext)
-                if os.path.exists(img_path):
-                    pairs.append((xml, img_path))
-                    break
-        
-        return pairs
-    
-    def split_dataset(self, pairs):
-        random.shuffle(pairs)
-        train_split = int(len(pairs) * self.train_ratio)
-        
-        self.train_pairs = pairs[:train_split]
-        self.val_pairs = pairs[train_split:]
-        
-        print(f"Treino: {len(self.train_pairs)} imagens")
-        print(f"Val:    {len(self.val_pairs)} imagens")
-    
-    def parse_points_to_polygon(self, points_str):
-        polygon = []
-        for point in points_str.split():
-            x, y = map(float, point.split(","))
-            polygon.extend([x, y])
-        return polygon
-    
-    def polygon_to_bbox(self, polygon):
-        xs = [polygon[i] for i in range(0, len(polygon), 2)]
-        ys = [polygon[i] for i in range(1, len(polygon), 2)]
-        
-        x_min = min(xs)
-        y_min = min(ys)
-        x_max = max(xs)
-        y_max = max(ys)
-        
-        width = x_max - x_min
-        height = y_max - y_min
-        
-        return [x_min, y_min, width, height]
-    
-    def calculate_area(self, polygon):
-        xs = [polygon[i] for i in range(0, len(polygon), 2)]
-        ys = [polygon[i] for i in range(1, len(polygon), 2)]
-        
-        area = 0.0
-        n = len(xs)
-        for i in range(n):
-            j = (i + 1) % n
-            area += xs[i] * ys[j]
-            area -= xs[j] * ys[i]
-        
-        return abs(area) / 2.0
-    
-    def process_pair(self, xml_path, img_path, img_id, split):
-        img = Image.open(img_path)
-        width, height = img.size
-        
-        img_filename = os.path.basename(img_path)
-        img_dest = os.path.join(self.output_dir, split, img_filename)
-        shutil.copy(img_path, img_dest)
-        
-        image_data = {
-            "id": img_id,
-            "file_name": img_filename,
-            "width": width,
-            "height": height
-        }
-        
-        tree = ET.parse(xml_path)
-        root = tree.getroot()
-        
-        annotations_data = []
-        cell_count = 0
-        
-        for table in root.findall("table"):
-            for cell in table.findall("cell"):
-                coords = cell.find("Coords")
-                if coords is None:
-                    continue
-                
-                points_str = coords.attrib["points"]
-                segmentation = self.parse_points_to_polygon(points_str)
-                bbox = self.polygon_to_bbox(segmentation)
-                area = self.calculate_area(segmentation)
-                
-                annotations_data.append({
-                    "segmentation": segmentation,
-                    "bbox": bbox,
-                    "area": area
-                })
-                
-                cell_count += 1
-        
-        print(f"ok {img_filename} → {split} . {cell_count} células")
-        
-        return image_data, annotations_data
-    
-    def process_split(self, pairs, split_name):   
-        coco_data = {
-            "info": {
-                "description": "Table Cell Detection Dataset",
-                "version": "1.0",
-                "year": 2025,
-                "date_created": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            },
-            "licenses": [],
+        images_dir = os.path.join(split_path, "images")
+        labels_dir = os.path.join(split_path, "labels")
+
+        coco = {
             "images": [],
             "annotations": [],
-            "categories": self.categories
+            "categories": categories
         }
-        
-        annotation_id = 1
-        
-        for img_id, (xml_path, img_path) in enumerate(pairs, start=1):
-            image_data, annotations_list = self.process_pair(xml_path, img_path, img_id, split_name)
-            
-            coco_data["images"].append(image_data)
-            
-            for ann_data in annotations_list:
-                annotation = {
-                    "id": annotation_id,
-                    "image_id": img_id,
-                    "category_id": 1,
-                    "segmentation": [ann_data["segmentation"]],
-                    "area": ann_data["area"],
-                    "bbox": ann_data["bbox"],
+
+        ann_id = 1
+
+        for image_name in os.listdir(images_dir):
+            if not image_name.lower().endswith((".jpg", ".png", ".jpeg")):
+                continue
+
+            img_path = os.path.join(images_dir, image_name)
+            lbl_path = os.path.join(labels_dir, image_name.rsplit(".", 1)[0] + ".txt")
+
+            img = Image.open(img_path)
+            w, h = img.size
+
+            image_id = len(coco["images"]) + 1
+
+            shutil.copy(img_path, os.path.join(out_images_dir, image_name))
+
+            coco["images"].append({
+                "id": image_id,
+                "file_name": image_name,
+                "width": w,
+                "height": h
+            })
+
+            if not os.path.exists(lbl_path):
+                continue
+
+            with open(lbl_path, "r") as f:
+                lines = f.readlines()
+
+            for line in lines:
+                values = line.strip().split()
+
+                cls = int(values[0]) # class id
+                coords = list(map(float, values[1:])) # bounding box coords
+
+                # YOLO segmentation: x1, y1, x2, y2, ..., xN, yN (normalized)
+                polygon = []
+                for i in range(0, len(coords), 2):
+                    x = round(coords[i] * w, 2)
+                    y = round(coords[i+1] * h, 2)
+                    polygon.extend([x, y])
+
+                # cálculo do bbox
+                xs = polygon[0::2]
+                ys = polygon[1::2]
+                x_min, x_max = min(xs), max(xs)
+                y_min, y_max = min(ys), max(ys)
+                bbox = [x_min, y_min, round(x_max - x_min, 2), round(y_max - y_min, 2)]
+
+                coco["annotations"].append({
+                    "id": ann_id,
+                    "image_id": image_id,
+                    "category_id": cls,
+                    "bbox": bbox,
+                    "area": round(bbox[2] * bbox[3], 2),
+                    "segmentation": [polygon],   
                     "iscrowd": 0
-                }
-                coco_data["annotations"].append(annotation)
-                annotation_id += 1
-        
-        json_path = os.path.join(self.output_dir, f"{split_name}.json")
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(coco_data, f, indent=2)
-        
-        print(f"JSON salvo: {json_path}")
-    
+                })
+                ann_id += 1
+
+        return coco
+
     def run(self):
-        
-        self.create_folders()
-        xml_files, _ = self.find_files()
-        pairs = self.associate_pairs(xml_files)
-        self.split_dataset(pairs)
-        
-        self.process_split(self.train_pairs, "train")
-        self.process_split(self.val_pairs, "val")
+
+        for fold in sorted(os.listdir(self.folds_dir)):
+            fold_path = os.path.join(self.folds_dir, fold)
+            if not os.path.isdir(fold_path):
+                continue
+
+            print(f"\n Processando fold: {fold}")
+
+            yml_path = os.path.join(fold_path, "dataset.yaml")
+            categories = self.load_classes(yml_path)
+
+            out_fold_dir = os.path.join(self.output_dir, fold)
+            os.makedirs(out_fold_dir, exist_ok=True)
+
+            # PROCESSAR train
+            train_path = os.path.join(fold_path, "train")
+            out_train_dir = os.path.join(out_fold_dir, "train")
+            os.makedirs(out_train_dir, exist_ok=True)
+
+            print(f" → Convertendo train...")
+            coco_train = self.process_split(train_path, "train", categories, out_train_dir)
+            with open(os.path.join(out_fold_dir, "train.json"), "w") as f:
+                json.dump(coco_train, f, indent=2)
+
+            # PROCESSAR val
+            val_path = os.path.join(fold_path, "val")
+            out_val_dir = os.path.join(out_fold_dir, "val")
+            os.makedirs(out_val_dir, exist_ok=True)
+
+            print(f" → Convertendo val...")
+            coco_val = self.process_split(val_path, "val", categories, out_val_dir)
+            with open(os.path.join(out_fold_dir, "val.json"), "w") as f:
+                json.dump(coco_val, f, indent=2)
+
+            print(f"Fold {fold} finalizado.")
+
 
 if __name__ == "__main__":
-    converter = MaskRCNNConverter(
-        base_dir="./TRACKB1",
-        output_dir="./dataset_RCNN",
-        train_ratio=0.8
+    converter = YOLO2MaskRCNN(
+        folds_dir="dataset_folds",
+        output_dir="dataset_rcnn"
     )
-    
     converter.run()
