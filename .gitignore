@@ -1,6 +1,10 @@
 teste0.ipynb/
 teste.ipynb/
-dataset_rcnn/
+
+fin_tab_net_dataset/
+resized_fin_tab_net/
+
+
 dataset/
 resized_dataset/
 dataset_folds/
