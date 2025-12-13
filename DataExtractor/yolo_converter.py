@@ -6,16 +6,14 @@ from glob import glob
 
 import pandas as pd
 from pathlib import Path
-from typing import Iterable, Tuple
+from typing import Iterable, Tuple, Literal
 
 import random
 
 
-class ICDARYOLOConverter:
-    # Deixei a classe como estática 
-    class_id = 0
-    class_label = 'cell'
 
+class YOLOConverter:
+    
     @staticmethod
     def create_folders(root_dataset_path : str | Path, 
                        include_test : bool = False):
@@ -30,6 +28,54 @@ class ICDARYOLOConverter:
         for split_path in split_paths:  
             os.makedirs(os.path.join(root_dataset_path, split_path, 'images'), exist_ok=True)
             os.makedirs(os.path.join(root_dataset_path, split_path, 'labels'), exist_ok=True)
+        
+    
+    @staticmethod
+    def convert_xy2yolo(xmin : int, ymin : int, xmax : int, ymax : int):
+        '''
+        DocString
+        '''
+        
+        xcentral = (xmax + xmin) // 2
+        ycentral = (ymax + ymin) // 2
+        width = xmax - xmin
+        height = ymax - ymin
+
+        return xcentral, ycentral, width, height
+    
+    @staticmethod
+    def convert_bouding_box_xy2yolo(bounding_box : Iterable[Tuple[int]],
+                                      image_width : int, image_height : int):
+        '''
+        Converte uma bouding box dada por [[xmin, ymin], [xmax, ymax]] em uma bounding box
+        com as coordenadas dos pontos normalizadas pelas respectivas dimensões das imagens
+        retornando [ xcentral / image_width, ycentral / image_height, width / image_width, height / image_height ]
+        '''
+        
+        xmin, ymin, xmax, ymax = sum(bounding_box, [])
+        xcentral, ycentral, width, height = YOLOConverter.convert_xy2yolo(xmin, ymin, xmax, ymax)
+        
+        xcentral /= image_width
+        ycentral /= image_height
+        width /= image_width
+        height /= image_height
+
+        return [xcentral, ycentral, width, height] 
+
+
+    @staticmethod
+    def convert_bounding_boxes_xy2yolo(bounding_boxes : Iterable[Iterable[Tuple[int]]],
+                                       image_width : int, image_height : int):
+        '''  
+        Converte umas lista de bounding boxes dadas por [[[x0min, y0min], [x0max, y0max]], ...[[xnmin, ynmin], [xnmax, ynmax]]]
+        em uma lista de bounding boxes com as coordenadas dos pontos normalizadas pelas respectivas dimensões das imagens dadas
+        por [ xcentral / image_width, ycentral / image_height, width / image_width, height / image_height ]
+        '''
+        
+        converted_bouding_boxes = [YOLOConverter.convert_bouding_box_xy2yolo(boudning_box, image_width, image_height)
+                                   for boudning_box in bounding_boxes]
+        
+        return converted_bouding_boxes
     
     @staticmethod
     def normalize_mask_points( 
@@ -68,205 +114,103 @@ class ICDARYOLOConverter:
     
         for mask in masks:        
             # normaliza os pontos da máscara
-            normilized_mask = ICDARYOLOConverter.normalize_mask_points(mask, image_width, image_height)  
+            normilized_mask = YOLOConverter.normalize_mask_points(mask, image_width, image_height)  
             normalized_masks.append(normilized_mask) 
         
         return normalized_masks
 
     @staticmethod
-    def create_txt_file_content(normalized_masks : Iterable[Iterable[Tuple[float]]]):
+    def create_mask_txt_file_content(normalized_masks : Iterable[Iterable[Tuple[float]]],
+                                     class_ids : Iterable[int]):
 
         lines = []
-        for mask in normalized_masks:
+        for class_id, mask in zip(class_ids, normalized_masks):
             # constroi a string com os pontos normalizados x1_norm y2_norm x2_norm y2_norm ... xn_norm yn_norm 
             poly_str = " ".join([f"{coord:.6f}" for xy_point in mask for coord in xy_point ])
             # define a string que representa a linha com class_id x1_norm y2_norm x2_norm y2_norm ... xn_norm yn_norm 
-            line = f"{ICDARYOLOConverter.class_id} {poly_str}"
+            line = f"{class_id} {poly_str}"
             # adiciona a linnha na lista de linhas
             lines.append(line)       
 
         # concatena todas as linhas do arquivo TXT em uma string separadas pela quebra de linha
         return "\n".join(lines)
+    
+    @staticmethod
+    def create_bbox_txt_file_content(normalized_bouding_boxes : Iterable[Iterable[Tuple[float]]],
+                                     class_ids : Iterable[int]):
+
+        lines = []
+        for class_id, bbox in zip(class_ids, normalized_bouding_boxes):
+            xcentral, ycentral, width, height = bbox
+            line = f"{class_id} {xcentral} {ycentral} {width} {height}"
+            lines.append(line)
+
+        # concatena todas as linhas do arquivo TXT em uma string separadas pela quebra de linha
+        return "\n".join(lines)
+
+
+   
+    @staticmethod
+    def create_yaml_content(output_dir : str | Path, 
+                            train_fold_path : str | Path, 
+                            class_ids : Iterable[int], 
+                            class_labels : Iterable[str],
+                            task : Literal['segment', 'detect'],
+                            val_fold_path : str | Path = None, 
+                            test_fold_path : str | Path = None):
+        
+        header_content = f"path: {output_dir}\ntrain: {train_fold_path}\n"
+        header_content += f"val: {val_fold_path}\n" if val_fold_path is not None else ""
+        header_content += f"test: {val_fold_path}\n" if test_fold_path is not None else ""
+        header_content += f"task : {task}\n\nnames:\n"
+        classes_content = "".join([f"   {class_id}: {class_label}\n" for class_id, class_label in zip(class_ids, class_labels)])
+
+        return header_content + classes_content
+    
+    @staticmethod
+    def save_file(content : str,  path : str | Path):
+        with open(path, 'w') as file: 
+            file.write(content)
+
+
+class ICDARYOLOConverter:
+    # Deixei a classe como estática 
+    class_id = 0
+    class_label = 'cell'
 
     @staticmethod
-    def create_txt_file(content : str,  path : str | Path):
-        with open(path, 'w') as txt_file: 
-            txt_file.write(content)
-
-
     def process_masks(masks : Iterable[Iterable[Tuple[float]]], 
                       image_width : int, 
                       image_height : int,
                       path_txt_file : str | Path):
         
-        normalized_masks = ICDARYOLOConverter.normalize_masks(masks, image_width, image_height)
-        txt_file_content =  ICDARYOLOConverter.create_txt_file_content(normalized_masks)
-        ICDARYOLOConverter.create_txt_file(txt_file_content, path_txt_file)
+        normalized_masks = YOLOConverter.normalize_masks(masks, image_width, image_height)
+        class_ids = len(normalized_masks) * [ICDARYOLOConverter.class_id]
+        txt_file_content = YOLOConverter.create_mask_txt_file_content(normalized_masks, class_ids)
+        YOLOConverter.save_file(txt_file_content, path_txt_file)
 
         return normalized_masks
 
-    
     @staticmethod
-    def create_yaml( 
-                    output_dir : str | Path = None, 
-                    train_fold_path : str | Path = None, 
-                    val_fold_path : str | Path = None):  #cria um yaml
+    def create_yaml(output_dir : str | Path, 
+                    train_fold_path : str | Path, 
+                    val_fold_path : str | Path):
+    
 
         yaml_path = os.path.join(output_dir, "dataset.yaml")
-        
-        with open(yaml_path, "w") as f:
-            f.write(
-f"""path: {os.path.abspath(output_dir)}
-train: {os.path.abspath(train_fold_path)}
-val: {os.path.abspath(val_fold_path)}
-task: segment
-
-names:
-  {ICDARYOLOConverter.class_id}: {ICDARYOLOConverter.class_label}
-"""
-            )
-        
-        print(f"\nYAML criado em: {yaml_path}")
-        return yaml_path
-
-
-class YOLOConverter:
-    
-    def __init__(self, base_dir="./TRACKB1", output_dir="./dataset_YOLO", train_ratio=0.8, class_id=0):
-        self.base_dir = base_dir
-        self.gt_dir = base_dir
-        self.output_dir = output_dir
-        self.images_dir = os.path.join(output_dir, "images")
-        self.labels_dir = os.path.join(output_dir, "labels")
-        self.train_ratio = train_ratio
-        self.class_id = class_id
-        
-        self.train_pairs = []
-        self.val_pairs = []
-    
-    def create_folders(self):
-        for d in [self.images_dir, self.labels_dir]:
-            if not os.path.exists(d):
-                os.makedirs(d)
-        
-        for split in ["train", "val"]:
-            os.makedirs(os.path.join(self.images_dir, split), exist_ok=True)
-            os.makedirs(os.path.join(self.labels_dir, split), exist_ok=True)
-    
-    def find_files(self):
-        image_files = sorted(
-            glob(os.path.join(self.gt_dir, "*.jpg")) +
-            glob(os.path.join(self.gt_dir, "*.png")) +
-            glob(os.path.join(self.gt_dir, "*.TIFF"))
+        yaml_content = YOLOConverter.create_yaml_content(
+            output_dir = output_dir, 
+            train_fold_path = train_fold_path,
+            val_fold_path = val_fold_path,
+            class_ids = [ICDARYOLOConverter.class_id],
+            class_labels = [ICDARYOLOConverter.class_label],
+            task = 'segment'
         )
-        xml_files = sorted(glob(os.path.join(self.gt_dir, "*.xml")))
-        print(f"XMLs: {len(xml_files)}")
-        print(f"Imagens:{len(image_files)}")
-        
-        return xml_files, image_files
-    
-    def associate_pairs(self, xml_files):
-        pairs = []
-        for xml in xml_files:
-            base = os.path.splitext(os.path.basename(xml))[0]
-            
-            for ext in [".jpg", ".png", ".TIFF"]:
-                img_path = os.path.join(self.gt_dir, base + ext)
-                if os.path.exists(img_path):
-                    pairs.append((xml, img_path))
-                    break
-        
-        return pairs
-    
-    def split_dataset(self, pairs):
-        random.shuffle(pairs)
-        train_split = int(len(pairs) * self.train_ratio)
-        
-        self.train_pairs = pairs[:train_split]
-        self.val_pairs = pairs[train_split:]
-        
-        print(f"Treino: {len(self.train_pairs)} imagens")
-        print(f"Val:    {len(self.val_pairs)} imagens")
-    
-    def normalize_points(self, points, w, h):
-        pts = []
-        for p in points.split():
-            x, y = map(float, p.split(","))
-            pts.append(x / w)
-            pts.append(y / h)
-        return pts
-    
-    def convert_annotation(self, xml_path, img_path):
-        tree = ET.parse(xml_path)
-        root = tree.getroot()
-        img = Image.open(img_path)
-        w, h = img.size       
-        lines = []
-        for table in root.findall("table"):
-            for cell in table.findall("cell"):
-                coords = cell.find("Coords")
-                if coords is None:
-                    continue               
-                points = coords.attrib["points"]
-                poly_norm = self.normalize_points(points, w, h)
-                poly_str = " ".join([f"{p:.6f}" for p in poly_norm])
-                line = f"{self.class_id} {poly_str}"
-                lines.append(line)       
-        return "\n".join(lines)
-    
-    def process_pair(self, xml_path, img_path, split):
-        img_name = os.path.basename(img_path)
-        base = os.path.splitext(img_name)[0]
-        
-        img_out = os.path.join(self.images_dir, split, img_name)
-        label_out = os.path.join(self.labels_dir, split, base + ".txt")
-        
-        shutil.copy(img_path, img_out)
-        
-        txt = self.convert_annotation(xml_path, img_path)
-        with open(label_out, "w", encoding="utf-8") as f:
-            f.write(txt)
-        
-        print(f"ok {img_name} → {split}")
-    
-    def process_all(self):
-        for xml_path, img_path in self.train_pairs:
-            self.process_pair(xml_path, img_path, "train")
-        for xml_path, img_path in self.val_pairs:
-            self.process_pair(xml_path, img_path, "val")
-    
-    def create_yaml(self): #cria um yaml
-        yaml_path = os.path.join(self.output_dir, "trackb1-seg.yaml")
-        
-        with open(yaml_path, "w") as f:
-            f.write(
-f"""path: {os.path.abspath(self.output_dir)}
-train: images/train
-val: images/val
-task: segment
 
-names:
-  0: cell
-"""
-            )
-        
+        YOLOConverter.save_file(yaml_content, yaml_path)
+
         print(f"\nYAML criado em: {yaml_path}")
         return yaml_path
-    
-    def run(self):
-        self.create_folders()
-        xml_files, _ = self.find_files()
-        pairs = self.associate_pairs(xml_files)
-        self.split_dataset(pairs)
-        self.process_all()
-        yaml_path = self.create_yaml()
 
-if __name__ == "__main__":
-    converter = YOLOConverter(
-        base_dir="./TRACKB1",
-        output_dir="./dataset_YOLO",
-        train_ratio=0.8,
-        class_id=0
-    )
-    
-    converter.run()
+
+

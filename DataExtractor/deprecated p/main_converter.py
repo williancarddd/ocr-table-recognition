@@ -1,3 +1,5 @@
+##### DEPRECIADO #####
+
 import os
 from yolo_converter import YOLOConverter
 from maskrcnn_converter import MaskRCNNConverter
